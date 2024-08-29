@@ -1,0 +1,53 @@
+--Script out the users’ permissions on the target database, this is an important pre step to be completed to avoid any existing users access issues after the refresh.
+-- TSQL
+
+DECLARE @db NVARCHAR(128)
+SET @db = DB_NAME()
+
+-- Declare a table to hold the results
+DECLARE @permissions TABLE (
+    UserName NVARCHAR(128),
+    PermissionType NVARCHAR(128),
+    PermissionStateDesc NVARCHAR(128),
+    ObjectName NVARCHAR(128),
+    ObjectType NVARCHAR(128)
+)
+
+-- Insert user permissions into the table
+INSERT INTO @permissions
+SELECT 
+    u.name AS UserName,
+    p.permission_name AS PermissionType,
+    p.state_desc AS PermissionStateDesc,
+    o.name AS ObjectName,
+    o.type_desc AS ObjectType
+FROM 
+    sys.database_permissions p
+JOIN 
+    sys.database_principals u ON p.grantee_principal_id = u.principal_id
+LEFT JOIN 
+    sys.objects o ON p.major_id = o.object_id
+WHERE 
+    u.type IN ('S', 'U', 'G') -- S = SQL user, U = Windows user, G = Windows group
+ORDER BY 
+u.name, o.name, p.permission_name
+
+-- Declare a variable to hold the generated script
+DECLARE @script NVARCHAR(MAX)
+SET @script = ''
+
+-- Generate the script to create users and grant permissions
+SELECT @script = @script + 
+    'USE ' + QUOTENAME(@db) + ';
+    ' + CASE
+        WHEN ObjectType IS NULL THEN
+            'GRANT ' + PermissionType + ' TO ' + QUOTENAME(UserName) + ';
+            '
+        ELSE
+            'GRANT ' + PermissionType + ' ON ' + ObjectType + '::' + QUOTENAME(ObjectName) + ' TO ' + QUOTENAME(UserName) + ';
+            '
+    END
+FROM @permissions
+
+-- Print the generated script
+PRINT @script
